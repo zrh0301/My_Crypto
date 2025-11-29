@@ -1,6 +1,5 @@
 #include "../inc/wlc_bn.h"
 
-#ifdef ENABLE_BN_MEM
 void bn_set_zero(dig_t *x, int digs){
 	for (int i = 0; i < digs; ++i){
 		x[i] = 0;
@@ -8,13 +7,19 @@ void bn_set_zero(dig_t *x, int digs){
 }
 
 void bn_rand(dig_t *x, int digs){
-	for (int i = 0; i < digs; i++){
-		x[i] = rand();
-	}
+    ssize_t n = getrandom(x,digs*sizeof(dig_t),0);
+    if(n<0){
+        if(errno == EINTR) bn_rand(x,digs);
+    }
 }
 
 void bn_copy(dig_t *r, const dig_t *x, int digs){
 	for (int i = 0; i < digs; ++i) r[i] = x[i];
+}
+
+void bn_print(const dig_t* r,int digs){
+    for(int i=digs-1;i>=0;--i) printf("%x",r[i]);
+    printf("\n");
 }
 
 int bn_get_bits(const dig_t *x, int digs){
@@ -34,9 +39,9 @@ int bn_get_bits(const dig_t *x, int digs){
 		return 0;
 	}
 }
-#endif
 
-#ifdef ENABLE_BN_ADD
+
+
 dig_t bn_add(dig_t *r, const dig_t *x, const dig_t *y, int digs){
 	int i = 0;
 	register udi_t carry = 0;
@@ -72,9 +77,9 @@ void bn_mul(dig_t* r,const dig_t* x,const dig_t* y,int digs){
     }
 }
 
-#endif
 
-#ifdef ENABLE_BN_CMP
+
+
 int bn_cmp(const dig_t *x, const dig_t *y, int digs){
 	for (int i = digs - 1; i >= 0; --i){
 		if (x[i] < y[i]) return -1;
@@ -82,9 +87,9 @@ int bn_cmp(const dig_t *x, const dig_t *y, int digs){
 	}
 	return 0;
 }
-#endif
 
-#ifdef ENABLE_BN_SHIFT
+
+
 dig_t bn_lsh_low(dig_t *r, const dig_t *x, int bits, int digs){
 	if (bits >= 32){
 		while (bits >= 31){
@@ -122,9 +127,9 @@ dig_t bn_rsh_low(dig_t *r, const dig_t *x, int bits, int digs){
 	}
 	return carry_new >> (32 - bits);
 }
-#endif
 
-#ifdef ENABLE_BN_MOD
+
+
 void bn_mod_add(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int digs){
 	register dig_t *temp = calloc((digs + 1), sizeof(dig_t));
 	register dig_t *m_new = calloc((digs + 1), sizeof(dig_t));
@@ -592,4 +597,130 @@ void bn_mod_exp(dig_t *r, const dig_t *x, const dig_t *e, const dig_t *m, int di
     free(one);
 }
 
-#endif
+// 检查大数是否为 0
+// 返回值: 1 是 0, 0 不是 0
+int bn_is_zero(const dig_t *a, int digs) {
+    // 遍历每一个 limb (字)
+    for (int i = 0; i < digs; i++) {
+        // 只要发现任意一位不是 0，那就肯定不是 0
+        if (a[i] != 0) {
+            return 0; 
+        }
+    }
+    // 全部检查通过，确实是 0
+    return 1;
+}
+
+// 检查大数是否为 1
+// 返回值: 1 是 1, 0 不是 1
+int bn_is_one(const dig_t *a, int digs) {
+    if (digs <= 0) return 0; // 防御性编程
+
+    // 条件1: 最低位必须是 1
+    if (a[0] != 1) {
+        return 0;
+    }
+
+    // 条件2: 除了最低位，其他高位必须全是 0
+    for (int i = 1; i < digs; i++) {
+        if (a[i] != 0) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+// 辅助函数：带符号的大数减法或者模减法
+// x = (x - y) mod m
+// 注意：在这个算法里，x 和 y 的差可能是负数，如果是负数需要 +m
+void bn_mod_sub_optimize(dig_t *x, const dig_t *y, const dig_t *m, int digs) {
+    // 如果 x >= y，直接减
+    if (bn_cmp(x, y, digs) >= 0) {
+        bn_sub(x, x, y, digs);
+    } else {
+        // 如果 x < y，结果是负数，需要 x - y + m
+        // 等价于 m - (y - x)
+        dig_t *tmp = calloc(digs, sizeof(dig_t));
+        bn_sub(tmp, y, x, digs); // tmp = y - x
+        bn_sub(x, m, tmp, digs); // x = m - tmp
+        free(tmp);
+    }
+}
+
+// 辅助函数：模 m 除以 2
+// r = a / 2 mod m (前提：m 是奇数)
+void bn_mod_div2(dig_t *r, dig_t *a, const dig_t *m, int digs) {
+    // 检查 a 是否为奇数 (看最低位)
+    if (a[0] & 1) {
+        // 是奇数：r = (a + m) >> 1
+        // 注意：a+m 可能会进位溢出最高位，需要小心处理
+        dig_t carry = bn_add(r, a, m, digs); 
+        bn_rsh_low(r, r, 1, digs);
+        if (carry) {
+            // 如果有进位，进位的那 1 也是要右移进来的，变成了最高位的 0x8000...
+            r[digs-1] |= ((dig_t)1 << 31); 
+        }
+    } else {
+        // 是偶数：r = a >> 1
+        bn_rsh_low(r, a, 1, digs);
+    }
+}
+
+// ==========================================
+// 二进制求模逆 (Binary Inversion)
+// 计算 r = a^-1 mod m
+// 限制：m 必须是奇数
+// ==========================================
+void bn_mod_inv(dig_t *r, const dig_t *a, const dig_t *m, int digs) {
+    dig_t *u = calloc(digs, sizeof(dig_t));
+    dig_t *v = calloc(digs, sizeof(dig_t));
+    dig_t *x1 = calloc(digs, sizeof(dig_t));
+    dig_t *x2 = calloc(digs, sizeof(dig_t));
+
+    // 初始化
+    bn_copy(u, a, digs);
+    bn_copy(v, m, digs);
+    x1[0] = 1; // x1 = 1
+    bn_set_zero(x2, digs); // x2 = 0
+
+    // 循环直到 u == 0 或 v == 0 (实际上 u=1 或 v=1 时就差不多了)
+    // 这里为了通用，循环直到其中一个为 0，非 0 的那个就是 GCD
+    while (!bn_is_zero(u, digs) && !bn_is_zero(v, digs)) {
+        
+        // 1. 消除 u 的偶因子
+        while ((u[0] & 1) == 0) { // while u is even
+            bn_rsh_low(u, u, 1, digs); // u = u / 2
+            bn_mod_div2(x1, x1, m, digs); // x1 = x1 / 2 mod m
+        }
+
+        // 2. 消除 v 的偶因子
+        while ((v[0] & 1) == 0) { // while v is even
+            bn_rsh_low(v, v, 1, digs); // v = v / 2
+            bn_mod_div2(x2, x2, m, digs); // x2 = x2 / 2 mod m
+        }
+
+        // 3. 减法步骤
+        if (bn_cmp(u, v, digs) >= 0) {
+            bn_sub(u, u, v, digs);        // u = u - v
+            bn_mod_sub_optimize(x1, x2, m, digs); // x1 = x1 - x2 mod m
+        } else {
+            bn_sub(v, v, u, digs);        // v = v - u
+            bn_mod_sub_optimize(x2, x1, m, digs); // x2 = x2 - x1 mod m
+        }
+    }
+
+    // 结果处理
+    // 如果 GCD(a, m) == 1，那么 u 和 v 中最后剩下的那个非零值一定是 1
+    if (bn_is_one(u, digs)) {
+        bn_copy(r, x1, digs);
+    } else if (bn_is_one(v, digs)) {
+        bn_copy(r, x2, digs);
+    } else {
+        // 错误：a 和 m 不互质，不存在逆元
+        bn_set_zero(r, digs); 
+    }
+
+    free(u); free(v); free(x1); free(x2);
+}
+
