@@ -6,15 +6,25 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/random.h>
+#include <errno.h>
 
 #define ENABLE_BN_MEM
 #define ENABLE_BN_ADD
 #define ENABLE_BN_CMP
 #define ENABLE_BN_SHIFT
 #define ENABLE_BN_MOD
+#ifdef __cplusplus
+	extern "C"{
+#endif
+		
 void bn_mod_rdc(dig_t* r, const dig_t* x, const dig_t* m, int xdigs, int mdigs);
 void bn_mod_mul(dig_t* r, const dig_t* x, const dig_t* y, const dig_t* m, int digs);
 void bn_mod_exp(dig_t* r, const dig_t* x, const dig_t* e, const dig_t* m, int digs);
+void bn_mod_inv(dig_t *r, const dig_t *a, const dig_t *m, int digs);
+int bn_is_zero(const dig_t *a, int digs);
 
 //#define ENABLE_BN_EXTRA
 
@@ -43,10 +53,6 @@ void bn_mod_exp(dig_t* r, const dig_t* x, const dig_t* e, const dig_t* m, int di
  /*============================================================================*/
  /* Function definitions                                                       */
  /*============================================================================*/
-
-#ifdef __cplusplus
- extern "C" {	/* start of __cplusplus */
-#endif
 
 
 

@@ -18,7 +18,7 @@ void bn_copy(dig_t *r, const dig_t *x, int digs){
 }
 
 void bn_print(const dig_t* r,int digs){
-    for(int i=digs-1;i>=0;--i) printf("%x",r[i]);
+    for(int i=digs-1;i>=0;--i) printf("%08x",r[i]);
     printf("\n");
 }
 
@@ -143,17 +143,50 @@ void bn_mod_add(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int di
 	free(m_new);
 }
 
-void bn_mod_sub(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int digs){
-	register dig_t *temp = calloc((digs + 1), sizeof(dig_t));
-	register dig_t *m_new = calloc((digs + 1), sizeof(dig_t));
-	bn_copy(m_new, m, digs);
-
-	temp[digs] = bn_sub(temp, x, y, digs);
-	while (bn_cmp(temp, m_new, digs + 1) >= 0) bn_sub(temp, temp, m_new, digs + 1);
-
-	bn_copy(r, temp, digs);
-	free(temp);
-	free(m_new);
+void bn_mod_sub(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int digs) {
+    // 比较 x 和 y
+    int cmp = 0;
+    for (int i = digs - 1; i >= 0; --i) {
+        if (x[i] > y[i]) {
+            cmp = 1;
+            break;
+        } else if (x[i] < y[i]) {
+            cmp = -1;
+            break;
+        }
+    }
+    
+    if (cmp >= 0) {
+        // x >= y，直接减法
+        bn_sub(r, x, y, digs);
+    } else {
+        // x < y，计算 r = x - y + m
+        dig_t carry = 0;
+        for (int i = 0; i < digs; ++i) {
+            // 先计算 m[i] - y[i]
+            dig_t diff = m[i] - y[i];
+            
+            // 加上 x[i] 和进位
+            dig_t sum = diff + x[i] + carry;
+            
+            // 更新进位
+            if (diff < y[i]) {
+                carry = 1;  // 借位
+            } else if (diff == y[i] && carry) {
+                carry = 1;
+            } else {
+                // 检查加法是否溢出
+                carry = (sum < diff) || (carry && sum == diff) ? 1 : 0;
+            }
+            
+            r[i] = sum;
+        }
+        
+        // 如果还有进位，需要再次减去 m
+        if (carry) {
+            bn_sub(r, r, m, digs);
+        }
+    }
 }
 
 void bn_mod_hlv(dig_t *r, const dig_t *x, const dig_t *m, int digs){
