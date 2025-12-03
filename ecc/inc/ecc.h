@@ -20,4 +20,4 @@ void ecc_copy(ecc_point*& r,const ecc_point* p);
 void ecc_make_point(ecc_point*& r,const dig_t* x,const dig_t* y,const ecc_param* param);
 void ecc_add(ecc_point*& r,const ecc_point* p,const ecc_point* q,const ecc_param* param);
 void ecc_double(ecc_point*& r,const ecc_point* p,const ecc_param* param);
-void ecc_mul(ecc_point*& pk, const dig_t* sk, const ecc_param* param);
+void ecc_mul(ecc_point*& r,const ecc_point* g,const dig_t* sk,const ecc_param* param);
