@@ -18,7 +18,7 @@ void bn_copy(dig_t *r, const dig_t *x, int digs){
 }
 
 void bn_print(const dig_t* r,int digs){
-    for(int i=digs-1;i>=0;--i) printf("%x",r[i]);
+    for(int i=digs-1;i>=0;--i) printf("%08x",r[i]);
     printf("\n");
 }
 
@@ -53,15 +53,24 @@ dig_t bn_add(dig_t *r, const dig_t *x, const dig_t *y, int digs){
 	return (dig_t)carry;
 }
 
-dig_t bn_sub(dig_t *r, const dig_t *x, const dig_t *y, int digs){
-	register dig_t carry = 0;
-	for (int i = 0; i < digs; ++i){
-		sdi_t tpx = (sdi_t)x[i];
-		sdi_t tpy = (sdi_t)y[i];
-		r[i] = x[i] - y[i] - carry;
-		carry = ((tpx - carry) < tpy);
-	}
-	return carry;
+dig_t bn_sub(dig_t *r, const dig_t *x, const dig_t *y, int digs) {
+    dig_t borrow = 0;
+    for (int i = 0; i < digs; ++i) {
+        // 使用 uint64_t 防止溢出和符号问题，逻辑更清晰
+        // 算式：x - y - borrow
+        // 如果 x[i] 小于 (y[i] + borrow)，则需要借位
+        
+        uint64_t lx = x[i];
+        uint64_t ly = y[i];
+        uint64_t diff = lx - ly - borrow;
+
+        r[i] = (dig_t)diff;
+        
+        // 判断借位：如果结果的高32位不为0（即变成了很大的数），说明发生了下溢
+        borrow = (diff >> 63) & 1; 
+        // 或者更直观的写法： if (lx < ly + borrow) borrow = 1; else borrow = 0;
+    }
+    return borrow;
 }
 
 void bn_mul(dig_t* r,const dig_t* x,const dig_t* y,int digs){
@@ -143,17 +152,17 @@ void bn_mod_add(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int di
 	free(m_new);
 }
 
-void bn_mod_sub(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int digs){
-	register dig_t *temp = calloc((digs + 1), sizeof(dig_t));
-	register dig_t *m_new = calloc((digs + 1), sizeof(dig_t));
-	bn_copy(m_new, m, digs);
+void bn_mod_sub(dig_t *r, const dig_t *x, const dig_t *y, const dig_t *m, int digs) {
+    // 1. 直接计算 r = x - y
+    dig_t borrow = bn_sub(r, x, y, digs);
 
-	temp[digs] = bn_sub(temp, x, y, digs);
-	while (bn_cmp(temp, m_new, digs + 1) >= 0) bn_sub(temp, temp, m_new, digs + 1);
-
-	bn_copy(r, temp, digs);
-	free(temp);
-	free(m_new);
+    // 2. 如果发生了借位（说明 x < y），结果是负的
+    // 在模 m 意义下，负数 r 等价于 r + m
+    if (borrow) {
+        bn_add(r, r, m, digs);
+    }
+    
+    // 如果没有借位，r 已经是正数且 r < m (因为 x < m)，不需要任何操作
 }
 
 void bn_mod_hlv(dig_t *r, const dig_t *x, const dig_t *m, int digs){
